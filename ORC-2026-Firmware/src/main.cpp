@@ -40,19 +40,21 @@ TaskHandle_t ControlTask;
 void controlLoop(void * pvParameters);
 
 void setup() {
+    leftMotor.setup();
+    rightMotor.setup();
+	distanceSensor.setup();
+    
+    leftMotor.setPower(1.0f);
+	rightMotor.setPower(1.0f);
+
     Serial.begin(115200);
     Comms::setup("ORC-2026");
 
-    leftMotor.setup();
-    rightMotor.setup();
-
-	distanceSensor.setup();
 
     // Pin the Control Loop to Core 1 (Priority 1)
-    xTaskCreatePinnedToCore(controlLoop, "PID_Task", 4096, NULL, 1, &ControlTask, 1);
+    // xTaskCreatePinnedToCore(controlLoop, "PID_Task", 4096, NULL, 1, &ControlTask, 1);
 
-	leftMotor.setPower(1.0f);
-	rightMotor.setPower(1.0f);
+
 }
 
 void loop() {

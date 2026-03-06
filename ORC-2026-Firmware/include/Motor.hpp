@@ -13,7 +13,7 @@ int negativePin;
 int encoderAPin;
 int encoderBPin;
 int id;
-ESP32Encoder encoder;
+// ESP32Encoder encoder;
 int64_t lastCount = 0;
 uint32_t lastTime = 0;
 float cachedVelocity = 0.0f;
@@ -32,8 +32,8 @@ void setup() {
     ledcSetup(2*id+1, 20000, 8); // Channel 1, 20 kHz, 8-bit resolution
     ledcAttachPin(positivePin, 2*id);
     ledcAttachPin(negativePin, 2*id+1);
-    ESP32Encoder::useInternalWeakPullResistors = UP;
-    encoder.attachFullQuad(encoderAPin, encoderBPin);
+    // ESP32Encoder::useInternalWeakPullResistors = UP;
+    // encoder.attachFullQuad(encoderAPin, encoderBPin);
 };
 
 // Poswer = [-1, 1], where negative is reverse and positive is forward
@@ -67,7 +67,8 @@ float getVelocity() {
 void update() {
     // --- VELOCITY MEASUREMENT ---
     uint32_t now = micros();
-    int64_t  count = encoder.getCount();
+    // int64_t  count = encoder.getCount();
+    int64_t count = 0;
     uint32_t dt = now - lastTime;
     if (dt > 0) {
         int64_t delta = count - lastCount;
