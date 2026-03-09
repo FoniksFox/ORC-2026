@@ -51,11 +51,12 @@ void setup() {
     rightMotor.setup();
 	distanceSensor.setup();
     
-    leftMotor.setPower(1.0f);
+    // leftMotor.setPower(1.0f);
 	rightMotor.setPower(1.0f);
+    leftMotor.setPower(-1.0f);
 
     //BLUETOOTH CODE START
-    Serial.begin(115200);
+    Serial.begin(9600);
     Serial.println("Starting ESP32 Bluetooth Server...");
     
     // The PC will look for this exact name
