@@ -5,6 +5,7 @@
 #include "Comms.hpp"
 #include "Motor.hpp"
 #include "DistanceSensor.hpp"
+#include "BluetoothConnection.h"
 
 /* TODO */
 /**
@@ -31,6 +32,12 @@ MotorWithEncoder rightMotor(Pinout::MOTOR_RIGHT_POSITIVE, Pinout::MOTOR_RIGHT_NE
 
 DistanceSensor distanceSensor(Pinout::DISTANCE_SENSOR_TRIGGER, Pinout::DISTANCE_SENSOR_ECHO);
 
+//BLUETOOTH CODE START
+BluetoothConnection bt;
+unsigned long lastSendTime = 0;
+float targetRightV = 0.0f, targetLeftV = 0.0f;
+const int UPDATE_TIME = 5000; //refresh time for each update
+//BLUETOOTH CODE END
 
 static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -47,14 +54,20 @@ void setup() {
     leftMotor.setPower(1.0f);
 	rightMotor.setPower(1.0f);
 
+    //BLUETOOTH CODE START
     Serial.begin(115200);
-    Comms::setup("ORC-2026");
-
+    Serial.println("Starting ESP32 Bluetooth Server...");
+    
+    // The PC will look for this exact name
+    if (bt.startServer(4, "ESP32_Robot")) {
+        Serial.println("Server active. Waiting for PC to connect...");
+    } else {
+        Serial.println("Failed to start Bluetooth!");
+    }
+    //BLUETOOTH CODE END
 
     // Pin the Control Loop to Core 1 (Priority 1)
     // xTaskCreatePinnedToCore(controlLoop, "PID_Task", 4096, NULL, 1, &ControlTask, 1);
-
-
 }
 
 void loop() {
@@ -66,8 +79,52 @@ void loop() {
 		lastTrigger = now;
     }
 
-    // CORE 0: Handle Bluetooth incoming packets
-    Comms::parse(targetV, targetW, mux);
+    //BLUETOOTH CODE START
+    if (!bt.isConnected()) {
+        delay(100);
+        return;
+    }
+
+    UpdateVelocity vel;
+    SetMode mode;
+    if (bt.receive(vel, UPDATE_VELOCITY_ID)) {
+        Serial.println("\n--- Received Update Command ---");
+        Serial.print("Right Velocity : "); Serial.println(vel.rightVelocity);
+        Serial.print("Left Velocity: "); Serial.println(vel.leftVelocity);
+        targetRightV = vel.rightVelocity;
+        targetLeftV = vel.leftVelocity;
+
+        //Reply to config changes
+        LogTelemetry telemetry = {LOG_TELEMETRY_ID, targetRightV, targetLeftV, distance, 0};
+        bt.send(telemetry);
+        lastSendTime = millis();
+    } else if (bt.receive(mode, SET_MODE_ID)) {
+        Serial.println("\n--- Received Set Mode Command ---");
+        Serial.print("New Mode : "); Serial.println(mode.mode);
+        if (mode.mode == 0) { // STOP MODE
+            targetLeftV = 0.0f;
+            targetRightV = 0.0f;
+        } else if (mode.mode == 1) { // auto mode (para Linea)
+
+        } else { // tank mode
+
+        }
+        // USA ESTO PARA ENVIAR EL UPDATE AL CLIENTE
+        // LogTelemetry telemetry = {LOG_TELEMETRY_ID, targetRightV, targetLeftV, distance, 0};
+        // bt.send(telemetry);
+        // lastSendTime = millis();
+
+    }
+
+    if (millis() - lastSendTime >= UPDATE_TIME) {
+        LogTelemetry response = {LOG_TELEMETRY_ID, targetRightV, targetLeftV, distance, 0};
+        if (bt.send(response)) {
+            Serial.println("Sent telemetry update");
+        }
+
+    }
+    //BLUETOOTH CODE END
+
 
     vTaskDelay(pdMS_TO_TICKS(20));
 }
