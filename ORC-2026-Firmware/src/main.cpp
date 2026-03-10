@@ -7,53 +7,26 @@
 #include "DistanceSensor.hpp"
 #include "BluetoothConnection.h"
 
-/* TODO */
-/**
- * Add moving average to sensors
- * Implement PI velocity loop
- * Implement PID velocity loop
- * Clean up the code in different files
- * Use actual numbers for kinematics and PID constants
- * Define the pins that will actually be used
- * 
- */
-
-// --- ROBOT KINEMATICS ---
-const float CENTER_OFFSET = 0.05; // Meters (d) - Dist from axle to geometric center
-
 // --- GLOBALS ---
-float targetV = 0, targetW = 0;			// Setpoints (spinlock-protected)
-volatile uint32_t startTime = 0;		// Written+read only in ISR, safe as volatile
-float distance = 0;						// Written in ISR, read in tasks (spinlock-protected)
-constexpr float TRACK_WIDTH = 0.3;		// Meters (T) - Distance between the two wheels (for inverse kinematics)
+float targetV = 0, targetW = 0;
+volatile uint32_t startTime = 0;
+constexpr float TRACK_WIDTH = 0.3;
 
 MotorWithEncoder leftMotor(Pinout::MOTOR_LEFT_POSITIVE, Pinout::MOTOR_LEFT_NEGATIVE, Pinout::ENCODER_LEFT_A, Pinout::ENCODER_LEFT_B);
 MotorWithEncoder rightMotor(Pinout::MOTOR_RIGHT_POSITIVE, Pinout::MOTOR_RIGHT_NEGATIVE, Pinout::ENCODER_RIGHT_A, Pinout::ENCODER_RIGHT_B);
 
 DistanceSensor distanceSensor(Pinout::DISTANCE_SENSOR_TRIGGER, Pinout::DISTANCE_SENSOR_ECHO);
 
-//BLUETOOTH CODE START
 BluetoothConnection bt;
 unsigned long lastSendTime = 0;
 float targetRightV = 0.0f, targetLeftV = 0.0f;
 const int UPDATE_TIME = 5000; //refresh time for each update
-//BLUETOOTH CODE END
-
-static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-
-// Task Handles
-TaskHandle_t ControlTask;
-
-void controlLoop(void * pvParameters);
+int curr_mode = 1;
 
 void setup() {
     leftMotor.setup();
     rightMotor.setup();
 	distanceSensor.setup();
-    
-    // leftMotor.setPower(1.0f);
-	rightMotor.setPower(1.0f);
-    leftMotor.setPower(-1.0f);
 
     //BLUETOOTH CODE START
     Serial.begin(9600);
@@ -61,9 +34,9 @@ void setup() {
     
     // The PC will look for this exact name
     if (bt.startServer(4, "ESP32_Robot")) {
-        Serial.println("Server active. Waiting for PC to connect...");
+        // Serial.println("Server active. Waiting for PC to connect...");
     } else {
-        Serial.println("Failed to start Bluetooth!");
+        // Serial.println("Failed to start Bluetooth!");
     }
     //BLUETOOTH CODE END
 
@@ -78,81 +51,77 @@ void loop() {
     if (now - lastTrigger >= 60) {
         distanceSensor.trigger();
 		lastTrigger = now;
-    }
+        // Serial.println("Distance: " + String(distanceSensor.getDistance()) + " cm");
+    };
 
-    //BLUETOOTH CODE START
-    if (!bt.isConnected()) {
-        delay(100);
-        return;
-    }
+    // //BLUETOOTH CODE START
+    // if (!bt.isConnected()) {
+    //     delay(100);
+    //     return;
+    // }
 
     UpdateVelocity vel;
     SetMode mode;
     if (bt.receive(vel, UPDATE_VELOCITY_ID)) {
-        Serial.println("\n--- Received Update Command ---");
-        Serial.print("Right Velocity : "); Serial.println(vel.rightVelocity);
-        Serial.print("Left Velocity: "); Serial.println(vel.leftVelocity);
+        // Serial.println("\n--- Received Update Command ---");
+        // Serial.print("Right Velocity : "); Serial.println(vel.rightVelocity);
+        // Serial.print("Left Velocity: "); Serial.println(vel.leftVelocity);
         targetRightV = vel.rightVelocity;
         targetLeftV = vel.leftVelocity;
 
         //Reply to config changes
-        LogTelemetry telemetry = {LOG_TELEMETRY_ID, targetRightV, targetLeftV, distance, 0};
+        LogTelemetry telemetry = {LOG_TELEMETRY_ID, targetRightV, targetLeftV, distanceSensor.getDistance(), 0};
         bt.send(telemetry);
         lastSendTime = millis();
     } else if (bt.receive(mode, SET_MODE_ID)) {
-        Serial.println("\n--- Received Set Mode Command ---");
-        Serial.print("New Mode : "); Serial.println(mode.mode);
-        if (mode.mode == 0) { // STOP MODE
-            targetLeftV = 0.0f;
-            targetRightV = 0.0f;
-        } else if (mode.mode == 1) { // auto mode (para Linea)
+        // Serial.println("\n--- Received Set Mode Command ---");
+        // Serial.print("New Mode : "); Serial.println(mode.mode);
+        
+        // curr_mode = mode.mode;
 
-        } else { // tank mode
-
-        }
         // USA ESTO PARA ENVIAR EL UPDATE AL CLIENTE
-        // LogTelemetry telemetry = {LOG_TELEMETRY_ID, targetRightV, targetLeftV, distance, 0};
+        // LogTelemetry telemetry = {LOG_TELEMETRY_ID, targetRightV, targetLeftV, distanceSensor.getDistance(), 0};
         // bt.send(telemetry);
         // lastSendTime = millis();
 
     }
 
     if (millis() - lastSendTime >= UPDATE_TIME) {
-        LogTelemetry response = {LOG_TELEMETRY_ID, targetRightV, targetLeftV, distance, 0};
+        LogTelemetry response = {LOG_TELEMETRY_ID, targetRightV, targetLeftV, distanceSensor.getDistance(), 0};
         if (bt.send(response)) {
-            Serial.println("Sent telemetry update");
+            // Serial.println("Sent telemetry update");
         }
 
     }
-    //BLUETOOTH CODE END
+
+    if (curr_mode == 0) { // STOP MODE
+        targetLeftV = 0.0f;
+        targetRightV = 0.0f;
+    } else if (curr_mode == 1) { // auto mode (para Linea)
+        auto distance = distanceSensor.getDistance();
+        if (distance < 10.0f) {
+            targetRightV = 0.0f;
+            targetLeftV = 0.0f;
+        } else if (distance < 30.0f) { // Steer right
+            targetRightV = 1.0f;
+            targetLeftV = (distance - 20.0f) / 10.0f; // Linear scaling from 0 to 1 as distance goes from 30 to 10
+        } else if (distance < 40.0f) { // Go stright
+            targetLeftV = 1.0f;
+            targetRightV = 1.0f;
+        } else if (distance < 60) { // Steer left
+            targetLeftV = 1.0f;
+            targetRightV = (distance - 50.0f) / 10.0f; // Linear scaling from 0 to 1 as distance goes from 40 to 60
+        } else { // Stop
+            targetLeftV = 0.0f;
+            targetRightV = 0.0f;
+        }
+    } else { // tank mode
+
+    }
+
+    rightMotor.setVelocity(targetRightV);
+    leftMotor.setVelocity(targetLeftV);
 
 
     vTaskDelay(pdMS_TO_TICKS(20));
-}
-
-void controlLoop(void * pvParameters) {
-    for(;;) {
-        portENTER_CRITICAL(&mux);
-        float v = targetV;
-        float w = targetW;
-        portEXIT_CRITICAL(&mux);
-
-        // --- INVERSE KINEMATICS ---
-        // TODO: replace magic 0.5 with (track_width / 2.0f) once measured
-        float left_target_vel  = v - (w * TRACK_WIDTH / 2.0f); // m/s
-        float right_target_vel = v + (w * TRACK_WIDTH / 2.0f); // m/s
-
-        // TODO: replace 0.0f with actual measured velocities from encoder deltas
-		float left_measured_vel = leftMotor.getVelocity();
-		float right_measured_vel = rightMotor.getVelocity();
-        float measuredV = (left_measured_vel + right_measured_vel) / 2.0f; // m/s
-        float measuredW = (right_measured_vel - left_measured_vel) / TRACK_WIDTH; // rad/s
-
-        Comms::sendTelemetry(measuredV, measuredW, distanceSensor.getDistance());
-
-		leftMotor.update();
-		rightMotor.update();
-
-        vTaskDelay(pdMS_TO_TICKS(10)); // 100Hz
-    }
 }

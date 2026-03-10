@@ -25,7 +25,7 @@ class DistanceSensor {
         } else {
             uint32_t duration = micros() - startTime;
             portENTER_CRITICAL_ISR(&mux);
-            cachedDistance = duration * 0.000017f; // microseconds → meters
+            cachedDistance = duration * 0.017f; // microseconds → meters
             portEXIT_CRITICAL_ISR(&mux);
         }
     }

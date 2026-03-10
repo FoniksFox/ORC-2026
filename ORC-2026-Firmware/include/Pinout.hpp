@@ -5,8 +5,8 @@ namespace Pinout {
     // Motor Driver (PWM)
     constexpr int MOTOR_RIGHT_POSITIVE = 32;
     constexpr int MOTOR_RIGHT_NEGATIVE = 33;
-    constexpr int MOTOR_LEFT_POSITIVE = 25;
-    constexpr int MOTOR_LEFT_NEGATIVE = 26;
+    constexpr int MOTOR_LEFT_POSITIVE = 26;
+    constexpr int MOTOR_LEFT_NEGATIVE = 25;
 
     // Motor Encoder (PCNT) (not used)
     constexpr int ENCODER_LEFT_A = 34;
