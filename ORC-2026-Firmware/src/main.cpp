@@ -21,7 +21,7 @@ BluetoothConnection bt;
 unsigned long lastSendTime = 0;
 float targetRightV = 0.0f, targetLeftV = 0.0f;
 const int UPDATE_TIME = 5000; //refresh time for each update
-int curr_mode = 1;
+int curr_mode = 0;
 
 void setup() {
     leftMotor.setup();
@@ -77,7 +77,7 @@ void loop() {
         // Serial.println("\n--- Received Set Mode Command ---");
         // Serial.print("New Mode : "); Serial.println(mode.mode);
         
-        // curr_mode = mode.mode;
+        curr_mode = mode.mode;
 
         // USA ESTO PARA ENVIAR EL UPDATE AL CLIENTE
         // LogTelemetry telemetry = {LOG_TELEMETRY_ID, targetRightV, targetLeftV, distanceSensor.getDistance(), 0};
