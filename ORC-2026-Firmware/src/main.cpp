@@ -20,10 +20,11 @@ DistanceSensor distanceSensor(Pinout::DISTANCE_SENSOR_TRIGGER, Pinout::DISTANCE_
 BluetoothConnection bt;
 unsigned long lastSendTime = 0;
 float targetRightV = 0.0f, targetLeftV = 0.0f;
-const int UPDATE_TIME = 5000; //refresh time for each update
+const int UPDATE_TIME = 100; //refresh time for each update
 int curr_mode = 0;
 
 void setup() {
+    // ESP32Encoder::useInternalWeakPullResistors = UP;
     leftMotor.setup();
     rightMotor.setup();
 	distanceSensor.setup();
@@ -33,7 +34,7 @@ void setup() {
     Serial.println("Starting ESP32 Bluetooth Server...");
     
     // The PC will look for this exact name
-    if (bt.startServer(4, "ESP32_Robot")) {
+    if (bt.startServer(1, "ESP32_Robot")) {
         // Serial.println("Server active. Waiting for PC to connect...");
     } else {
         // Serial.println("Failed to start Bluetooth!");
@@ -77,13 +78,13 @@ void loop() {
         // Serial.println("\n--- Received Set Mode Command ---");
         // Serial.print("New Mode : "); Serial.println(mode.mode);
         
+        bt.rx_buffer.clear();
         curr_mode = mode.mode;
 
         // USA ESTO PARA ENVIAR EL UPDATE AL CLIENTE
         // LogTelemetry telemetry = {LOG_TELEMETRY_ID, targetRightV, targetLeftV, distanceSensor.getDistance(), 0};
         // bt.send(telemetry);
         // lastSendTime = millis();
-
     }
 
     if (millis() - lastSendTime >= UPDATE_TIME) {
@@ -91,33 +92,91 @@ void loop() {
         if (bt.send(response)) {
             // Serial.println("Sent telemetry update");
         }
-
+        lastSendTime = millis();
     }
 
     if (curr_mode == 0) { // STOP MODE
         targetLeftV = 0.0f;
         targetRightV = 0.0f;
-    } else if (curr_mode == 1) { // auto mode (para Linea)
-        auto distance = distanceSensor.getDistance();
-        if (distance < 10.0f) {
-            targetRightV = 0.0f;
-            targetLeftV = 0.0f;
-        } else if (distance < 30.0f) { // Steer right
-            targetRightV = 1.0f;
-            targetLeftV = (distance - 20.0f) / 10.0f; // Linear scaling from 0 to 1 as distance goes from 30 to 10
-        } else if (distance < 40.0f) { // Go stright
-            targetLeftV = 1.0f;
-            targetRightV = 1.0f;
-        } else if (distance < 60) { // Steer left
-            targetLeftV = 1.0f;
-            targetRightV = (distance - 50.0f) / 10.0f; // Linear scaling from 0 to 1 as distance goes from 40 to 60
-        } else { // Stop
-            targetLeftV = 0.0f;
-            targetRightV = 0.0f;
-        }
-    } else { // tank mode
+    } else if (curr_mode == 1) { // competition line mode
+        constexpr float    EMERGENCY_DIST =  5.0f;  // cm: wall → emergency stop
+        constexpr float    TOGGLE_FAR     = 15.0f;  // cm:  5–15cm zone → hold to start/stop
+        constexpr float    LEFT_FAR       = 25.0f;  // cm: 15–25cm zone → timed left turn
+        constexpr float    RIGHT_FAR      = 40.0f;  // cm: 25–40cm zone → timed right turn
+        constexpr uint32_t TOGGLE_HOLD_MS = 600;    // ms: how long to hold in toggle zone
+        constexpr uint32_t LEFT_TURN_MS   = 400;    // ms: left turn duration  (~45°, tune this)
+        constexpr uint32_t RIGHT_TURN_MS  = 400;    // ms: right turn duration (~45°, tune this)
+        constexpr float    TURN_SPEED     = 0.8f;   // pivot speed (0–1)
 
+        static bool     running      = false; // robot starts stopped
+        static bool     inTurn       = false;
+        static int      turnDir      = 0;
+        static uint32_t turnStart    = 0;
+        static bool     toggleArmed  = true;  // requires hand removal before re-triggering
+        static bool     inToggleZone = false;
+        static uint32_t toggleStart  = 0;
+
+        float    distance = distanceSensor.getDistance();
+        uint32_t nowMs    = millis();
+
+        if (distance > 0.0f && distance < EMERGENCY_DIST) {
+            // Emergency: stop and reset
+            running = false;
+            inTurn  = false;
+            targetLeftV  = 0.0f;
+            targetRightV = 0.0f;
+        } else if (inTurn) {
+            // BLIND TURN: sensor ignored, execute timed turn
+            uint32_t dur = (turnDir == -1) ? LEFT_TURN_MS : RIGHT_TURN_MS;
+            if (nowMs - turnStart >= dur) {
+                inTurn = false;
+                targetLeftV  = 1.0f;
+                targetRightV = 1.0f;
+            } else if (turnDir == -1) { // LEFT
+                targetLeftV  = -TURN_SPEED;
+                targetRightV =  TURN_SPEED;
+            } else {                    // RIGHT
+                targetLeftV  =  TURN_SPEED;
+                targetRightV = -TURN_SPEED;
+            }
+        } else {
+            // SENSOR ACTIVE: check toggle zone first
+            bool handInToggle = (distance > 0.0f && distance < TOGGLE_FAR);
+            if (handInToggle && toggleArmed) {
+                if (!inToggleZone) {
+                    inToggleZone = true;
+                    toggleStart  = nowMs;
+                } else if (nowMs - toggleStart >= TOGGLE_HOLD_MS) {
+                    running      = !running;
+                    toggleArmed  = false;   // disarm until hand is removed
+                    inToggleZone = false;
+                }
+            } else if (!handInToggle) {
+                inToggleZone = false;
+                toggleArmed  = true;        // hand gone → rearm toggle
+            }
+
+            if (!running) {
+                targetLeftV  = 0.0f;
+                targetRightV = 0.0f;
+            } else if (distance >= TOGGLE_FAR && distance < LEFT_FAR) {
+                inTurn    = true;
+                turnDir   = -1;
+                turnStart = nowMs;
+            } else if (distance >= LEFT_FAR && distance < RIGHT_FAR) {
+                inTurn    = true;
+                turnDir   = 1;
+                turnStart = nowMs;
+            } else {
+                // no hand (> 40cm) or sensor timeout → go straight
+                targetLeftV  = 1.0f;
+                targetRightV = 1.0f;
+            }
+        }
+    } else {
+        // tank mode
     }
+
 
     rightMotor.setVelocity(targetRightV);
     leftMotor.setVelocity(targetLeftV);

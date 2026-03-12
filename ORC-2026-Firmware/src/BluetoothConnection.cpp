@@ -40,6 +40,11 @@ void BluetoothConnection::disconnect() {
 }
 
 // --- DATA TRANSFER ---
+void BluetoothConnection::flushReceiveBuffer() {
+    while (SerialBT.available()) SerialBT.read(); // drain hardware buffer
+    rx_buffer.clear();
+}
+
 bool BluetoothConnection::raw_send(const uint8_t* data, size_t length) {
     return SerialBT.write(data, length) == length;
 }

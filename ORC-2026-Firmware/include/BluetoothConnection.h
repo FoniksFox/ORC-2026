@@ -39,6 +39,7 @@ public:
     BluetoothConnection();
     ~BluetoothConnection();
 
+    std::vector<uint8_t> rx_buffer;
     // Server mode
     bool startServer(uint8_t channel = 4, const std::string& esp_name = "ESP32_Robot");
     bool waitForClient();
@@ -48,6 +49,7 @@ public:
     
     void disconnect();
     bool isConnected();
+    void flushReceiveBuffer();
 
     template <typename T>
     bool send(T& packet) {
@@ -63,7 +65,6 @@ public:
     }
 
 private:
-    std::vector<uint8_t> rx_buffer;
     BluetoothSerial SerialBT;
 
     bool raw_send(const uint8_t* data, size_t length);
